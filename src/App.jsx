@@ -1,1063 +1,285 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 
-/*
-|--------------------------------------------------------------------------
-| API CONFIGURATION
-|--------------------------------------------------------------------------
-|
-| Local development:
-| VITE_API_URL=http://localhost:5000
-|
-| Production:
-| VITE_API_URL=http://YOUR_BACKEND_IP
-|
-| Example:
-| VITE_API_URL=http://13.234.56.78
-|
-*/
-
-const API_URL = (
-  import.meta.env.VITE_API_URL || 'http://localhost:5000'
-).replace(/\/+$/, '');
-
-console.log('Frontend API URL:', API_URL);
-
-/*
-|--------------------------------------------------------------------------
-| AXIOS INSTANCE
-|--------------------------------------------------------------------------
-*/
-
-const api = axios.create({
-  baseURL: API_URL,
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json'
-  }
-});
-
-/*
-|--------------------------------------------------------------------------
-| APPLICATION
-|--------------------------------------------------------------------------
-*/
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+console.log('API URL:', API_URL);
 
 function App() {
-  /*
-  |--------------------------------------------------------------------------
-  | STATE
-  |--------------------------------------------------------------------------
-  */
-
   const [users, setUsers] = useState([]);
-
   const [loading, setLoading] = useState(true);
-
-  const [submitting, setSubmitting] = useState(false);
-
-  const [deletingId, setDeletingId] = useState(null);
-
-  const [error, setError] = useState('');
-
-  const [success, setSuccess] = useState('');
-
+  const [error, setError] = useState(null);
   const [health, setHealth] = useState(null);
-
-  const [healthLoading, setHealthLoading] = useState(true);
-
+  const [formData, setFormData] = useState({ name: '', email: '', role: 'user' });
   const [editingUserId, setEditingUserId] = useState(null);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    role: 'user'
-  });
+  // Check API Health
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/api/health`);
+        setHealth(res.data);
+      } catch (err) {
+        console.error('Health check failed:', err);
+        setHealth({ status: 'ERROR', message: 'Backend not reachable' });
+      }
+    };
 
-  /*
-  |--------------------------------------------------------------------------
-  | ERROR HANDLER
-  |--------------------------------------------------------------------------
-  */
-
-  const getErrorMessage = (err) => {
-    if (err.response) {
-      return (
-        err.response.data?.error ||
-        err.response.data?.message ||
-        `Request failed with status ${err.response.status}`
-      );
-    }
-
-    if (err.request) {
-      return 'Backend server is not reachable. Check the backend server, Nginx, Security Group and API URL.';
-    }
-
-    return err.message || 'An unexpected error occurred';
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | CLEAR MESSAGES
-  |--------------------------------------------------------------------------
-  */
-
-  const clearMessages = () => {
-    setError('');
-    setSuccess('');
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | CHECK BACKEND HEALTH
-  |--------------------------------------------------------------------------
-  */
-
-  const checkHealth = useCallback(async () => {
-    try {
-      setHealthLoading(true);
-
-      const response = await api.get('/api/health');
-
-      setHealth(response.data);
-    } catch (err) {
-      console.error('Health check failed:', err);
-
-      setHealth({
-        status: 'ERROR',
-        success: false,
-        message: getErrorMessage(err),
-        database: {
-          status: 'unknown'
-        }
-      });
-    } finally {
-      setHealthLoading(false);
-    }
+    checkHealth();
   }, []);
 
-  /*
-  |--------------------------------------------------------------------------
-  | FETCH USERS
-  |--------------------------------------------------------------------------
-  */
-
-  const fetchUsers = useCallback(async () => {
+  // Fetch Users
+  const fetchUsers = async () => {
     try {
       setLoading(true);
-      setError('');
-
-      const response = await api.get('/api/users');
-
-      setUsers(response.data?.data || []);
+      const res = await axios.get(`${API_URL}/api/users`);
+      setUsers(res.data.data ?? []);
+      setError(null);
     } catch (err) {
-      console.error('Fetch users failed:', err);
-
-      setUsers([]);
-      setError(
-        `Failed to load users: ${getErrorMessage(err)}`
-      );
+      setError('Failed to fetch users: ' + (err.response?.data?.error || err.message));
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  /*
-  |--------------------------------------------------------------------------
-  | INITIAL LOAD
-  |--------------------------------------------------------------------------
-  */
+  };
 
   useEffect(() => {
-    checkHealth();
-    fetchUsers();
-  }, [checkHealth, fetchUsers]);
+    let isMounted = true;
 
-  /*
-  |--------------------------------------------------------------------------
-  | FORM INPUT
-  |--------------------------------------------------------------------------
-  */
+    const loadUsers = async () => {
+      try {
+        setLoading(true);
+        const res = await axios.get(`${API_URL}/api/users`);
 
-  const handleInputChange = (event) => {
-    const { name, value } = event.target;
+        if (isMounted) {
+          setUsers(res.data.data ?? []);
+          setError(null);
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError('Failed to fetch users: ' + (err.response?.data?.error || err.message));
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
 
-    setFormData((previous) => ({
-      ...previous,
-      [name]: value
-    }));
-  };
+    loadUsers();
 
-  /*
-  |--------------------------------------------------------------------------
-  | RESET FORM
-  |--------------------------------------------------------------------------
-  */
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      email: '',
-      role: 'user'
-    });
-
-    setEditingUserId(null);
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | VALIDATE FORM
-  |--------------------------------------------------------------------------
-  */
-
-  const validateForm = () => {
-    const name = formData.name.trim();
-    const email = formData.email.trim();
-
-    if (name.length < 2) {
-      setError('Name must contain at least 2 characters.');
-      return false;
-    }
-
-    if (name.length > 100) {
-      setError('Name cannot exceed 100 characters.');
-      return false;
-    }
-
-    if (!email) {
-      setError('Email is required.');
-      return false;
-    }
-
-    const emailPattern =
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-    if (!emailPattern.test(email)) {
-      setError('Please enter a valid email address.');
-      return false;
-    }
-
-    return true;
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | SUBMIT USER
-  |--------------------------------------------------------------------------
-  */
-
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-
-    clearMessages();
-
-    if (!validateForm()) {
-      return;
-    }
-
+  // Add User
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     try {
-      setSubmitting(true);
-
-      const payload = {
-        name: formData.name.trim(),
-        email: formData.email.trim().toLowerCase(),
-        role: formData.role
-      };
-
       if (editingUserId) {
-        await api.put(
-          `/api/users/${editingUserId}`,
-          payload
-        );
-
-        setSuccess('User updated successfully.');
+        await axios.put(`${API_URL}/api/users/${editingUserId}`, formData);
       } else {
-        await api.post(
-          '/api/users',
-          payload
-        );
-
-        setSuccess('User created successfully.');
+        await axios.post(`${API_URL}/api/users`, formData);
       }
 
       resetForm();
-
       await fetchUsers();
-
-      await checkHealth();
     } catch (err) {
-      console.error('Save user failed:', err);
-
-      setError(
-        `${editingUserId ? 'Failed to update user' : 'Failed to create user'}: ${getErrorMessage(err)}`
-      );
-    } finally {
-      setSubmitting(false);
+      setError(`${editingUserId ? 'Failed to update user' : 'Failed to add user'}: ${err.response?.data?.error || err.message}`);
     }
   };
 
-  /*
-  |--------------------------------------------------------------------------
-  | EDIT USER
-  |--------------------------------------------------------------------------
-  */
+  const resetForm = () => {
+    setFormData({ name: '', email: '', role: 'user' });
+    setEditingUserId(null);
+  };
 
   const handleEdit = (user) => {
-    clearMessages();
-
     setEditingUserId(user._id);
-
-    setFormData({
-      name: user.name || '',
-      email: user.email || '',
-      role: user.role || 'user'
-    });
-
-    window.scrollTo({
-      top: 0,
-      behavior: 'smooth'
-    });
+    setFormData({ name: user.name, email: user.email, role: user.role });
+    setError(null);
   };
 
-  /*
-  |--------------------------------------------------------------------------
-  | DELETE USER
-  |--------------------------------------------------------------------------
-  */
-
+  // Delete User
   const handleDelete = async (id) => {
-    const confirmed = window.confirm(
-      'Are you sure you want to delete this user?'
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
     try {
-      clearMessages();
-
-      setDeletingId(id);
-
-      await api.delete(`/api/users/${id}`);
-
-      setSuccess('User deleted successfully.');
-
+      await axios.delete(`${API_URL}/api/users/${id}`);
       await fetchUsers();
-
-      await checkHealth();
     } catch (err) {
-      console.error('Delete user failed:', err);
-
-      setError(
-        `Failed to delete user: ${getErrorMessage(err)}`
-      );
-    } finally {
-      setDeletingId(null);
+      setError('Failed to delete user: ' + (err.response?.data?.error || err.message));
     }
   };
-
-  /*
-  |--------------------------------------------------------------------------
-  | REFRESH
-  |--------------------------------------------------------------------------
-  */
-
-  const handleRefresh = async () => {
-    clearMessages();
-
-    await Promise.all([
-      checkHealth(),
-      fetchUsers()
-    ]);
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | RENDER
-  |--------------------------------------------------------------------------
-  */
-
-  const isHealthy =
-    health?.status === 'OK';
-
-  const databaseConnected =
-    health?.database?.status === 'connected';
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        backgroundColor: '#f4f6f8',
-        padding: '30px 15px',
-        fontFamily:
-          'Arial, Helvetica, sans-serif',
-        boxSizing: 'border-box'
-      }}
-    >
-      <div
-        style={{
-          maxWidth: '900px',
-          margin: '0 auto'
-        }}
-      >
+    <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px', fontFamily: 'Arial, sans-serif' }}>
+      <h1 style={{ textAlign: 'center', color: '#333' }}>
+         Full Stack App on AWS
+      </h1>
 
-        {/* =================================================
-            HEADER
-        ================================================= */}
+      {/* Health Status */}
+      <div style={{
+        padding: '10px 20px',
+        borderRadius: '8px',
+        marginBottom: '20px',
+        backgroundColor: health?.status === 'OK' ? '#d4edda' : '#f8d7da',
+        color: health?.status === 'OK' ? '#155724' : '#721c24',
+        border: `1px solid ${health?.status === 'OK' ? '#c3e6cb' : '#f5c6cb'}`
+      }}>
+        <strong>API Status:</strong> {health?.message || 'Checking...'}
+        <br />
+        <small>Backend URL: {API_URL}</small>
+      </div>
 
-        <div
-          style={{
-            backgroundColor: '#ffffff',
-            padding: '25px',
-            borderRadius: '10px',
-            marginBottom: '20px',
-            border: '1px solid #dee2e6',
-            boxShadow:
-              '0 2px 8px rgba(0,0,0,0.05)'
-          }}
-        >
-          <h1
+      {/* Add User Form */}
+      <div style={{
+        backgroundColor: '#f8f9fa',
+        padding: '20px',
+        borderRadius: '8px',
+        marginBottom: '20px',
+        border: '1px solid #dee2e6'
+      }}>
+        <h2>{editingUserId ? 'Edit User' : 'Add New User'}</h2>
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: '10px' }}>
+            <input
+              type="text"
+              placeholder="Name"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              required
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ced4da' }}
+            />
+          </div>
+          <div style={{ marginBottom: '10px' }}>
+            <input
+              type="email"
+              placeholder="Email"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              required
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ced4da' }}
+            />
+          </div>
+          <div style={{ marginBottom: '10px' }}>
+            <select
+              value={formData.role}
+              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ced4da' }}
+            >
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <button
+            type="submit"
             style={{
-              margin: '0 0 8px 0',
-              color: '#212529',
-              textAlign: 'center'
+              backgroundColor: '#007bff',
+              color: '#fff',
+              border: 'none',
+              padding: '10px 20px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '16px'
             }}
           >
-            Full Stack App on AWS
-          </h1>
-
-          <p
-            style={{
-              margin: 0,
-              textAlign: 'center',
-              color: '#6c757d'
-            }}
-          >
-            React + Express + MongoDB Atlas
-          </p>
-        </div>
-
-        {/* =================================================
-            SYSTEM STATUS
-        ================================================= */}
-
-        <div
-          style={{
-            padding: '18px',
-            borderRadius: '10px',
-            marginBottom: '20px',
-
-            backgroundColor:
-              isHealthy
-                ? '#d4edda'
-                : '#f8d7da',
-
-            color:
-              isHealthy
-                ? '#155724'
-                : '#721c24',
-
-            border:
-              `1px solid ${
-                isHealthy
-                  ? '#c3e6cb'
-                  : '#f5c6cb'
-              }`
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '10px',
-              flexWrap: 'wrap'
-            }}
-          >
-            <div>
-              <strong>
-                Backend:
-              </strong>{' '}
-
-              {healthLoading
-                ? 'Checking...'
-                : health?.message ||
-                  'Backend unavailable'}
-            </div>
-
+            {editingUserId ? 'Save Changes' : 'Add User'}
+          </button>
+          {editingUserId && (
             <button
               type="button"
-              onClick={handleRefresh}
-              disabled={
-                loading ||
-                healthLoading
-              }
+              onClick={resetForm}
               style={{
+                marginLeft: '10px',
+                backgroundColor: '#6c757d',
+                color: '#fff',
                 border: 'none',
-                padding: '8px 14px',
-                borderRadius: '5px',
-                cursor:
-                  loading ||
-                  healthLoading
-                    ? 'not-allowed'
-                    : 'pointer',
-                backgroundColor: '#ffffff',
-                color: '#212529',
-                borderWidth: '1px',
-                borderStyle: 'solid',
-                borderColor: '#ced4da'
+                padding: '10px 20px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '16px'
               }}
             >
-              Refresh
+              Cancel
             </button>
-          </div>
+          )}
+        </form>
+      </div>
 
-          <div
-            style={{
-              marginTop: '10px',
-              fontSize: '14px'
-            }}
-          >
-            <div>
-              <strong>
-                API URL:
-              </strong>{' '}
-              {API_URL}
-            </div>
+      {/* Error Display */}
+      {error && (
+        <div style={{
+          padding: '10px',
+          backgroundColor: '#f8d7da',
+          color: '#721c24',
+          borderRadius: '4px',
+          marginBottom: '20px'
+        }}>
+          {error}
+        </div>
+      )}
 
-            <div>
-              <strong>
-                Database:
-              </strong>{' '}
-              {healthLoading
-                ? 'Checking...'
-                : databaseConnected
-                  ? 'Connected'
-                  : 'Disconnected'}
-            </div>
-
-            {health?.environment && (
+      {/* Users List */}
+      <h2>Users ({users.length})</h2>
+      {loading ? (
+        <p>Loading users...</p>
+      ) : (
+        <div>
+          {users.map((user) => (
+            <div
+              key={user._id}
+              style={{
+                padding: '15px',
+                marginBottom: '10px',
+                backgroundColor: '#fff',
+                border: '1px solid #dee2e6',
+                borderRadius: '8px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}
+            >
               <div>
-                <strong>
-                  Environment:
-                </strong>{' '}
-                {health.environment}
+                <strong>{user.name}</strong>
+                <br />
+                <small style={{ color: '#6c757d' }}>{user.email} | {user.role}</small>
+                <br />
+                <small style={{ color: '#adb5bd' }}>
+                  {new Date(user.createdAt).toLocaleDateString()}
+                </small>
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* =================================================
-            SUCCESS MESSAGE
-        ================================================= */}
-
-        {success && (
-          <div
-            style={{
-              padding: '14px',
-              backgroundColor: '#d4edda',
-              color: '#155724',
-              border:
-                '1px solid #c3e6cb',
-              borderRadius: '8px',
-              marginBottom: '20px'
-            }}
-          >
-            {success}
-          </div>
-        )}
-
-        {/* =================================================
-            ERROR MESSAGE
-        ================================================= */}
-
-        {error && (
-          <div
-            style={{
-              padding: '14px',
-              backgroundColor: '#f8d7da',
-              color: '#721c24',
-              border:
-                '1px solid #f5c6cb',
-              borderRadius: '8px',
-              marginBottom: '20px'
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        {/* =================================================
-            USER FORM
-        ================================================= */}
-
-        <div
-          style={{
-            backgroundColor: '#ffffff',
-            padding: '25px',
-            borderRadius: '10px',
-            marginBottom: '25px',
-            border:
-              '1px solid #dee2e6',
-            boxShadow:
-              '0 2px 8px rgba(0,0,0,0.05)'
-          }}
-        >
-          <h2
-            style={{
-              marginTop: 0
-            }}
-          >
-            {editingUserId
-              ? 'Edit User'
-              : 'Add New User'}
-          </h2>
-
-          <form
-            onSubmit={handleSubmit}
-          >
-
-            {/* NAME */}
-
-            <div
-              style={{
-                marginBottom: '15px'
-              }}
-            >
-              <label
-                style={{
-                  display: 'block',
-                  marginBottom: '6px',
-                  fontWeight: 'bold'
-                }}
-              >
-                Name
-              </label>
-
-              <input
-                type="text"
-                name="name"
-                placeholder="Enter user name"
-                value={formData.name}
-                onChange={handleInputChange}
-                disabled={submitting}
-                required
-                maxLength={100}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  boxSizing: 'border-box',
-                  border:
-                    '1px solid #ced4da',
-                  borderRadius: '5px',
-                  fontSize: '15px'
-                }}
-              />
-            </div>
-
-            {/* EMAIL */}
-
-            <div
-              style={{
-                marginBottom: '15px'
-              }}
-            >
-              <label
-                style={{
-                  display: 'block',
-                  marginBottom: '6px',
-                  fontWeight: 'bold'
-                }}
-              >
-                Email
-              </label>
-
-              <input
-                type="email"
-                name="email"
-                placeholder="Enter email address"
-                value={formData.email}
-                onChange={handleInputChange}
-                disabled={submitting}
-                required
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  boxSizing: 'border-box',
-                  border:
-                    '1px solid #ced4da',
-                  borderRadius: '5px',
-                  fontSize: '15px'
-                }}
-              />
-            </div>
-
-            {/* ROLE */}
-
-            <div
-              style={{
-                marginBottom: '20px'
-              }}
-            >
-              <label
-                style={{
-                  display: 'block',
-                  marginBottom: '6px',
-                  fontWeight: 'bold'
-                }}
-              >
-                Role
-              </label>
-
-              <select
-                name="role"
-                value={formData.role}
-                onChange={handleInputChange}
-                disabled={submitting}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  boxSizing: 'border-box',
-                  border:
-                    '1px solid #ced4da',
-                  borderRadius: '5px',
-                  fontSize: '15px'
-                }}
-              >
-                <option value="user">
-                  User
-                </option>
-
-                <option value="admin">
-                  Admin
-                </option>
-
-                <option value="teacher">
-                  Teacher
-                </option>
-
-                <option value="student">
-                  Student
-                </option>
-
-                <option value="staff">
-                  Staff
-                </option>
-              </select>
-            </div>
-
-            {/* BUTTONS */}
-
-            <button
-              type="submit"
-              disabled={submitting}
-              style={{
-                backgroundColor:
-                  submitting
-                    ? '#6c757d'
-                    : '#007bff',
-                color: '#ffffff',
-                border: 'none',
-                padding:
-                  '11px 20px',
-                borderRadius: '5px',
-                cursor:
-                  submitting
-                    ? 'not-allowed'
-                    : 'pointer',
-                fontSize: '15px'
-              }}
-            >
-              {submitting
-                ? 'Saving...'
-                : editingUserId
-                  ? 'Save Changes'
-                  : 'Add User'}
-            </button>
-
-            {editingUserId && (
-              <button
-                type="button"
-                onClick={() => {
-                  resetForm();
-                  clearMessages();
-                }}
-                disabled={submitting}
-                style={{
-                  marginLeft: '10px',
-                  backgroundColor:
-                    '#6c757d',
-                  color: '#ffffff',
-                  border: 'none',
-                  padding:
-                    '11px 20px',
-                  borderRadius: '5px',
-                  cursor:
-                    submitting
-                      ? 'not-allowed'
-                      : 'pointer',
-                  fontSize: '15px'
-                }}
-              >
-                Cancel
-              </button>
-            )}
-          </form>
-        </div>
-
-        {/* =================================================
-            USERS HEADER
-        ================================================= */}
-
-        <div
-          style={{
-            display: 'flex',
-            justifyContent:
-              'space-between',
-            alignItems: 'center',
-            marginBottom: '15px',
-            flexWrap: 'wrap',
-            gap: '10px'
-          }}
-        >
-          <h2
-            style={{
-              margin: 0
-            }}
-          >
-            Users ({users.length})
-          </h2>
-
-          <span
-            style={{
-              color: '#6c757d',
-              fontSize: '14px'
-            }}
-          >
-            {loading
-              ? 'Loading...'
-              : `${users.length} user(s)`}
-          </span>
-        </div>
-
-        {/* =================================================
-            LOADING
-        ================================================= */}
-
-        {loading && (
-          <div
-            style={{
-              backgroundColor:
-                '#ffffff',
-              padding: '25px',
-              textAlign: 'center',
-              borderRadius: '8px',
-              border:
-                '1px solid #dee2e6'
-            }}
-          >
-            Loading users...
-          </div>
-        )}
-
-        {/* =================================================
-            USERS LIST
-        ================================================= */}
-
-        {!loading &&
-          users.length > 0 && (
-            <div>
-              {users.map((user) => (
-                <div
-                  key={user._id}
+              <div>
+                <button
+                  onClick={() => handleEdit(user)}
                   style={{
-                    backgroundColor:
-                      '#ffffff',
-                    padding: '18px',
-                    marginBottom: '12px',
-                    border:
-                      '1px solid #dee2e6',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    justifyContent:
-                      'space-between',
-                    alignItems:
-                      'center',
-                    gap: '15px',
-                    flexWrap: 'wrap'
+                    marginRight: '8px',
+                    backgroundColor: '#ffc107',
+                    color: '#212529',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
                   }}
                 >
-
-                  {/* USER DETAILS */}
-
-                  <div
-                    style={{
-                      minWidth: 0,
-                      flex: 1
-                    }}
-                  >
-                    <strong
-                      style={{
-                        fontSize: '17px',
-                        color: '#212529'
-                      }}
-                    >
-                      {user.name}
-                    </strong>
-
-                    <div
-                      style={{
-                        marginTop: '5px',
-                        color: '#6c757d'
-                      }}
-                    >
-                      {user.email}
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: '5px',
-                        fontSize: '14px'
-                      }}
-                    >
-                      <strong>
-                        Role:
-                      </strong>{' '}
-                      {user.role}
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: '5px',
-                        color: '#adb5bd',
-                        fontSize: '13px'
-                      }}
-                    >
-                      Created:{' '}
-                      {user.createdAt
-                        ? new Date(
-                            user.createdAt
-                          ).toLocaleString()
-                        : 'N/A'}
-                    </div>
-                  </div>
-
-                  {/* ACTION BUTTONS */}
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: '8px'
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleEdit(user)
-                      }
-                      disabled={
-                        deletingId ===
-                        user._id
-                      }
-                      style={{
-                        backgroundColor:
-                          '#ffc107',
-                        color:
-                          '#212529',
-                        border:
-                          'none',
-                        padding:
-                          '9px 16px',
-                        borderRadius:
-                          '5px',
-                        cursor:
-                          'pointer'
-                      }}
-                    >
-                      Edit
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleDelete(
-                          user._id
-                        )
-                      }
-                      disabled={
-                        deletingId ===
-                        user._id
-                      }
-                      style={{
-                        backgroundColor:
-                          '#dc3545',
-                        color:
-                          '#ffffff',
-                        border:
-                          'none',
-                        padding:
-                          '9px 16px',
-                        borderRadius:
-                          '5px',
-                        cursor:
-                          deletingId ===
-                          user._id
-                            ? 'not-allowed'
-                            : 'pointer'
-                      }}
-                    >
-                      {deletingId ===
-                      user._id
-                        ? 'Deleting...'
-                        : 'Delete'}
-                    </button>
-                  </div>
-                </div>
-              ))}
+                  Edit
+                </button>
+                <button
+                  onClick={() => handleDelete(user._id)}
+                  style={{
+                    backgroundColor: '#dc3545',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
             </div>
-          )}
-
-        {/* =================================================
-            EMPTY STATE
-        ================================================= */}
-
-        {!loading &&
-          users.length === 0 && (
-            <div
-              style={{
-                backgroundColor:
-                  '#ffffff',
-                padding: '30px',
-                textAlign: 'center',
-                borderRadius: '8px',
-                border:
-                  '1px solid #dee2e6',
-                color: '#6c757d'
-              }}
-            >
-              No users found.
-            </div>
-          )}
-
-        {/* =================================================
-            FOOTER
-        ================================================= */}
-
-        <div
-          style={{
-            textAlign: 'center',
-            marginTop: '30px',
-            padding: '15px',
-            color: '#6c757d',
-            fontSize: '13px'
-          }}
-        >
-          React + Vite + Axios + Express +
-          MongoDB Atlas
+          ))}
+          {users.length === 0 && <p style={{ color: '#6c757d' }}>No users found.</p>}
         </div>
-
-      </div>
+      )}
     </div>
   );
 }
